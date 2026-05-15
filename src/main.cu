@@ -3,15 +3,33 @@
 #include <cuda_runtime.h>
 
 #include "utils.cuh"
-#include "maths.cuh"
+#include "math.cuh"
 
-__global__ void Render(float3 *fb, int width, int height)
+#include "color.cuh"
+#include "ray.cuh"
+#include "camera.cuh"
+
+__device__ Color Li(const Ray &r)
+{
+    float3 u = normalize(r.Direction());
+    float t = 0.5f * (u.y + 1.0f);
+    return (1.0f - t) * make_float3(1.0, 1.0, 1.0) + t * make_float3(0.5, 0.7, 1.0);
+}
+
+__global__ void RenderKernel(Color *fb, Camera cam, int width, int height)
 {
     int i = threadIdx.x + blockIdx.x * blockDim.x;
     int j = threadIdx.y + blockIdx.y * blockDim.y;
-    if((i >= width) || (j >= height)) return;
+    if ((i >= width) || (j >= height))
+        return;
+
     int pIdx = (height - j - 1) * width + i;
-    fb[pIdx] = make_float3( 255.99 * float(i) / width, 255.99 * float(j) / height, 255.99 * 0.2f);
+
+    float u = float(i) / float(width);
+    float v = float(j) / float(height);
+    Ray ray = cam.generateRay(u, v);
+    
+    fb[pIdx] = Li(ray);
 }
 
 int main()
@@ -26,10 +44,18 @@ int main()
     std::cout << "Kernel size = [" << tx << " x " << ty << "] blocks." << std::endl;
 
     int numPixels = width * height;
-    size_t fbSize = numPixels * sizeof(float3);
+    size_t fSize = numPixels * sizeof(Color);
 
-    float3 *fb;
-    CHECK_CUDA_ERROR(cudaMallocManaged((void **)&fb, fbSize));
+    Color *frame;
+    CHECK_CUDA_ERROR(cudaMallocManaged((void **)&frame, fSize));
+
+    float3 lookfrom = make_float3(0.0f, 0.0f, 0.0f);
+    float3 lookat = make_float3(0.0f, 0.0f, -1.0f);
+    float3 vup = make_float3(0.0f, 1.0f, 0.0f);
+    float vfov = 90.0f;
+    float aspectRatio = float(width) / float(height);
+
+    Camera cam = Camera(lookfrom, lookat, vup, vfov, aspectRatio);
 
     clock_t startTime, endTime;
     startTime = clock();
@@ -37,7 +63,7 @@ int main()
     dim3 blocksDim(width / tx + 1, height / ty + 1);
     dim3 threadsDim(tx, ty);
 
-    Render<<<blocksDim, threadsDim>>>(fb, width, height);
+    RenderKernel<<<blocksDim, threadsDim>>>(frame, cam, width, height);
     CHECK_CUDA_ERROR(cudaGetLastError());
     CHECK_CUDA_ERROR(cudaDeviceSynchronize());
 
@@ -45,8 +71,8 @@ int main()
     auto frameTime = ((double)(endTime - startTime)) / CLOCKS_PER_SEC;
     std::cout << "Took : " << frameTime << " secs." << std::endl;
 
-    Download(fb, "test.png", width, height, 3);
+    Download(frame, "test.png", width, height, 3);
 
-    CHECK_CUDA_ERROR(cudaFree(fb));
+    CHECK_CUDA_ERROR(cudaFree(frame));
     return 0;
 }
