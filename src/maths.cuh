@@ -17,8 +17,8 @@ This is part of the CUTIL library and is not supported by NVIDIA.
 Thanks to Linh Hah for additions and fixes.
 */
 
-#ifndef ZERO_VECTOR3_CUDA_HEADER
-#define ZERO_VECTOR3_CUDA_HEADER
+#ifndef ZERO_MATHS_CUDA_HEADER
+#define ZERO_MATHS_CUDA_HEADER
 
 #include <cuda_runtime.h>
 
