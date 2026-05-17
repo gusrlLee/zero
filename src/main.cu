@@ -71,7 +71,7 @@ int main()
     auto frameTime = ((double)(endTime - startTime)) / CLOCKS_PER_SEC;
     std::cout << "Took : " << frameTime << " secs." << std::endl;
 
-    Download(frame, "test.png", width, height, 3);
+    DownloadImage(frame, "test.png", width, height, 3);
 
     CHECK_CUDA_ERROR(cudaFree(frame));
     return 0;

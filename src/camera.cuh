@@ -16,7 +16,7 @@ public:
         float aRatio 
     )
     {
-        float theta = vfov * 3.14159265358979323846f / 180.0f;
+        float theta = vfov * PI / 180.0f;
         float h = tanf(theta / 2.0f);
         float viewport_height = 2.0f * h;
         float viewport_width = aRatio * viewport_height;

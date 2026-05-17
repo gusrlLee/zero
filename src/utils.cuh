@@ -4,6 +4,11 @@
 #include <iostream>
 #include <cuda_runtime.h>
 
+#ifndef STB_IMAGE_IMPLEMENTATION
+    #define STB_IMAGE_IMPLEMENTATION
+    #include "stb/stb_image.h"
+#endif
+
 #ifndef STB_IMAGE_WRITE_IMPLEMENTATION
     #define STB_IMAGE_WRITE_IMPLEMENTATION
     #include "stb/stb_image_write.h"
@@ -24,7 +29,7 @@ void checkCuda(cudaError_t result, char const *const func, const char *const fil
     }
 }
 
-void Download(Color* data, const char* fName, int width, int height, int channel)
+void DownloadImage(Color* data, const char* fName, int width, int height, int channel)
 {
     unsigned char* pixels = new unsigned char[width * height * 3];
 
