@@ -15,6 +15,10 @@ message(STATUS ">> CUDA Compiler Version: ${CMAKE_CUDA_COMPILER_VERSION}")
 message(STATUS ">> Using OptiX SDK at: ${OptiX_INSTALL_DIR}")
 message(STATUS "---------------------------------------------------")
 
+add_subdirectory(lib)
+
 add_executable(zero src/main.cu)
 target_include_directories(zero PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(zero PUBLIC ${CMAKE_SOURCE_DIR}/lib)
+
+target_link_libraries(zero PUBLIC tinygltf)

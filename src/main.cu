@@ -9,6 +9,8 @@
 #include "ray.cuh"
 #include "camera.cuh"
 
+#include "scene.cuh"
+
 __device__ Color Li(const Ray &r)
 {
     float3 u = normalize(r.Direction());
@@ -34,6 +36,14 @@ __global__ void RenderKernel(Color *fb, Camera cam, int width, int height)
 
 int main()
 {
+    Scene scn;
+    if (!scn.Load("../assets/DamagedHelmet/glTF/DamagedHelmet.gltf"))
+    {
+        printf("Failed to load glTF file...\n");
+        return -1;
+    }
+    scn.Clear();
+
     int width = 1200;
     int height = 600;
 
