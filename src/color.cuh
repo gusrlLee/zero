@@ -31,7 +31,7 @@ public:
     __host__ __device__ inline Color& operator*=(float s) { rgb *= s; return *this; }
     __host__ __device__ inline Color& operator/=(float s) { rgb /= s; return *this; }
 
-    __host__ __device__ inline float Luminance() const 
+    __host__ __device__ inline float luminance() const 
     {
         return 0.2126f * rgb.x + 0.7152f * rgb.y + 0.0722f * rgb.z;
     }

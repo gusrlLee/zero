@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
 project(zero LANGUAGES CXX CUDA)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_ARCHITECTURES native)
 
 if(NOT DEFINED OptiX_INSTALL_DIR)
@@ -17,8 +17,11 @@ message(STATUS "---------------------------------------------------")
 
 add_subdirectory(lib)
 
-add_executable(zero src/main.cu)
+add_executable(zero 
+    src/main.cu
+)
 target_include_directories(zero PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(zero PUBLIC ${CMAKE_SOURCE_DIR}/lib)
 
 target_link_libraries(zero PUBLIC tinygltf)
+target_link_libraries(zero PUBLIC tinyobjloader)
