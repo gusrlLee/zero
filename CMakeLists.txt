@@ -27,6 +27,10 @@ add_executable(${PROJECT_NAME}
     src/main.cpp
     src/core/Window.h
     src/core/Window.cpp
+    src/core/ZeroApp.h
+    src/core/ZeroApp.cpp
+    src/core/VulkanContext.h
+    src/core/VulkanContext.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

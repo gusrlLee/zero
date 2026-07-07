@@ -1,6 +1,7 @@
 #ifndef __ZERO_WINDOW_HEADER__
 #define __ZERO_WINDOW_HEADER__
 
+#include <SDL3/SDL.h>
 #include <iostream>
 
 class Window {
@@ -13,12 +14,13 @@ public:
 
     bool shouldClose() const { return m_shouldClose; }
     void pollEvents();
+    SDL_Window* getNativeHandle() const { return m_window; }
 
     int getWidth() const { return m_width; }
     int getHeight() const { return m_height; }
 
 private:
-    struct SDL_Window *m_window;
+    SDL_Window *m_window;
     int m_width;
     int m_height;
     bool m_shouldClose;
