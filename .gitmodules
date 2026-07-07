@@ -1,0 +1,9 @@
+[submodule "vender/ktx"]
+	path = vender/ktx
+	url = https://github.com/KhronosGroup/KTX-Software.git
+[submodule "vender/tinyobjloader"]
+	path = vender/tinyobjloader
+	url = https://github.com/tinyobjloader/tinyobjloader.git
+[submodule "vender/glm"]
+	path = vender/glm
+	url = https://github.com/g-truc/glm.git
