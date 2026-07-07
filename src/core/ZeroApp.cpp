@@ -5,6 +5,8 @@
 #include "renderer/IRenderer.h"
 #include "util/Log.h"
 
+#include "renderer/raster/PbrRenderer.h"
+
 #include <SDL3/SDL.h>
 #include <iostream>
 
@@ -26,8 +28,8 @@ void ZeroApp::init() {
     createFrameData();
 
     // 3. Renderer initialization (TODO: Plug in actual renderer later)
-    // m_renderer = std::make_unique<PbrRenderer>(m_vulkanContext.get(), m_swapchain.get());
-    // m_renderer->init();
+    m_renderer = std::make_unique<PbrRenderer>(m_vulkanContext.get(), m_swapchain.get());
+    m_renderer->init();
 
     m_isRunning = true;
     std::cout << "[Zero Engine] Initialization successfully completed." << std::endl;
@@ -46,7 +48,7 @@ void ZeroApp::createFrameData() {
     VkSemaphoreCreateInfo semaphoreCI{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     VkFenceCreateInfo fenceCI{
         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .flags = VK_FENCE_CREATE_SIGNALED_BIT // Start signaled so the first frame doesn't block forever
+        .flags = VK_FENCE_CREATE_SIGNALED_BIT
     };
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -61,8 +63,13 @@ void ZeroApp::createFrameData() {
         CHK(vkAllocateCommandBuffers(device, &allocInfo, &m_frames[i].commandBuffer));
 
         CHK(vkCreateSemaphore(device, &semaphoreCI, nullptr, &m_frames[i].imageAvailableSemaphore));
-        CHK(vkCreateSemaphore(device, &semaphoreCI, nullptr, &m_frames[i].renderFinishedSemaphore));
         CHK(vkCreateFence(device, &fenceCI, nullptr, &m_frames[i].inFlightFence));
+    }
+
+    uint32_t imageCount = m_swapchain->getImageCount();
+    m_renderFinishedSemaphores.resize(imageCount);
+    for (uint32_t i = 0; i < imageCount; i++) {
+        CHK(vkCreateSemaphore(device, &semaphoreCI, nullptr, &m_renderFinishedSemaphores[i]));
     }
 }
 
@@ -136,7 +143,7 @@ void ZeroApp::drawFrame() {
         .commandBufferCount = 1,
         .pCommandBuffers = &frame.commandBuffer,
         .signalSemaphoreCount = 1,
-        .pSignalSemaphores = &frame.renderFinishedSemaphore
+        .pSignalSemaphores = &m_renderFinishedSemaphores[imageIndex]
     };
 
     CHK(vkQueueSubmit(m_vulkanContext->getGraphicsQueue(), 1, &submitInfo, frame.inFlightFence));
@@ -146,7 +153,7 @@ void ZeroApp::drawFrame() {
     VkPresentInfoKHR presentInfo{
         .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
         .waitSemaphoreCount = 1,
-        .pWaitSemaphores = &frame.renderFinishedSemaphore,
+        .pWaitSemaphores = &m_renderFinishedSemaphores[imageIndex],
         .swapchainCount = 1,
         .pSwapchains = swapchains,
         .pImageIndices = &imageIndex
@@ -178,7 +185,18 @@ void ZeroApp::recreateSwapchain() {
 
     CHK(vkDeviceWaitIdle(m_vulkanContext->getDevice()));
 
+    for (auto sem : m_renderFinishedSemaphores) {
+        vkDestroySemaphore(m_vulkanContext->getDevice(), sem, nullptr);
+    }
+
     m_swapchain->recreate(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+
+    uint32_t imageCount = m_swapchain->getImageCount();
+    m_renderFinishedSemaphores.resize(imageCount);
+    VkSemaphoreCreateInfo semaphoreCI{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    for (uint32_t i = 0; i < imageCount; i++) {
+        CHK(vkCreateSemaphore(m_vulkanContext->getDevice(), &semaphoreCI, nullptr, &m_renderFinishedSemaphores[i]));
+    }
 
     if (m_renderer) {
         m_renderer->onResize(width, height);
@@ -192,13 +210,14 @@ void ZeroApp::cleanup() {
         VkDevice device = m_vulkanContext->getDevice();
         CHK(vkDeviceWaitIdle(device));
 
-        // Manually destroy Vulkan handles inside FrameData
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroySemaphore(device, m_frames[i].renderFinishedSemaphore, nullptr);
             vkDestroySemaphore(device, m_frames[i].imageAvailableSemaphore, nullptr);
             vkDestroyFence(device, m_frames[i].inFlightFence, nullptr);
             vkDestroyCommandPool(device, m_frames[i].commandPool, nullptr);
         }
+
+        for (auto sem : m_renderFinishedSemaphores) {
+            vkDestroySemaphore(device, sem, nullptr);
+        }
     }
-    // unique_ptrs (Renderer, Swapchain, VulkanContext, Window) will automatically release memory here.
 }

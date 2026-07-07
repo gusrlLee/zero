@@ -2,6 +2,7 @@
 #define __ZERO_LOG_HEADER__
 
 #include <volk/volk.h>
+#include <SDL3/SDL.h>
 #include <iostream>
 #include <stdexcept>
 #include <string>

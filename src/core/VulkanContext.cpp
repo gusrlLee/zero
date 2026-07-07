@@ -43,11 +43,15 @@ void VulkanContext::createInstance(Window* window) {
         .apiVersion = VK_API_VERSION_1_3 // Stable 1.3 for VMA compatibility and reference standard
     };
 
+    const std::vector<const char*> validationLayers = { "VK_LAYER_KHRONOS_validation" };
+
     VkInstanceCreateInfo createInfo{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pApplicationInfo = &appInfo,
+        .enabledLayerCount = static_cast<uint32_t>(validationLayers.size()),
+        .ppEnabledLayerNames = validationLayers.data(),
         .enabledExtensionCount = extensionCount,
-        .ppEnabledExtensionNames = instanceExtensions
+        .ppEnabledExtensionNames = instanceExtensions,
     };
 
     CHK(vkCreateInstance(&createInfo, nullptr, &m_instance));
@@ -104,9 +108,15 @@ void VulkanContext::createLogicalDevice() {
 
     // ★ Core Feature Activation Chain for Modern Rendering & Ray Tracing ★
 
+    VkPhysicalDeviceVulkan11Features enabledVk11Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+        .shaderDrawParameters = VK_TRUE 
+    };
+
     // 1. Buffer Device Address (BDA) & Descriptor Indexing
     VkPhysicalDeviceVulkan12Features enabledVk12Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+		.pNext = &enabledVk11Features, 
         .descriptorIndexing = VK_TRUE,
         .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
         .descriptorBindingVariableDescriptorCount = VK_TRUE,

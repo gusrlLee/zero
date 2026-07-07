@@ -14,7 +14,6 @@ struct FrameData {
     VkCommandPool commandPool;
     VkCommandBuffer commandBuffer;
     VkSemaphore imageAvailableSemaphore; // GPU: "Swapchain image is ready!"
-    VkSemaphore renderFinishedSemaphore; // GPU: "Rendering finished, safe to present!"
     VkFence inFlightFence;               // CPU: "Wait here until GPU finishes this frame"
 };
 
@@ -50,6 +49,7 @@ class ZeroApp {
         uint32_t m_currentFrame = 0;
         std::vector<FrameData> m_frames;
 
+        std::vector<VkSemaphore> m_renderFinishedSemaphores;
 };
 
 #endif

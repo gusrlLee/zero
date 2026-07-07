@@ -36,8 +36,16 @@ add_executable(${PROJECT_NAME}
     src/core/Swapchain.cpp
 
     src/renderer/IRenderer.h
+    src/renderer/ShaderCompiler.h
+    src/renderer/ShaderCompiler.cpp
+
+    src/renderer/raster/PbrRenderer.h
+    src/renderer/raster/PbrRenderer.cpp
+
 
     src/util/Log.h
+
+    shaders/raster/shader.slang
 )
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC VK_NO_PROTOTYPES)
