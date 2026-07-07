@@ -25,18 +25,27 @@ endif()
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
+    
     src/core/Window.h
     src/core/Window.cpp
     src/core/ZeroApp.h
     src/core/ZeroApp.cpp
     src/core/VulkanContext.h
     src/core/VulkanContext.cpp
+    src/core/Swapchain.h
+    src/core/Swapchain.cpp
+
+    src/renderer/IRenderer.h
+
+    src/util/Log.h
 )
 
+target_compile_definitions(${PROJECT_NAME} PUBLIC VK_NO_PROTOTYPES)
+
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(zero PRIVATE ${SDL_LIBRARY})
-target_link_libraries(zero PRIVATE ${Slang_LIBRARY})
-target_link_libraries(zero PRIVATE Vulkan::Vulkan)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL_LIBRARY})
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Slang_LIBRARY})
+target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan)
 
 # set_target_properties(zero PROPERTIES DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 # set_runtime_output_directory(${CMAKE_BINARY_DIR}/bin/)

@@ -1,12 +1,22 @@
 #ifndef __ZERO_APPLICATION_HEADER__
 #define __ZERO_APPLICATION_HEADER__
 
-#include <iostream>
+#include <memory>
+#include <vector>
+#include <volk/volk.h>
 
 class Window;
 class VulkanContext;
-class VulkanRenderer;
-class Scene;
+class Swapchain;
+class IRenderer;
+
+struct FrameData {
+    VkCommandPool commandPool;
+    VkCommandBuffer commandBuffer;
+    VkSemaphore imageAvailableSemaphore; // GPU: "Swapchain image is ready!"
+    VkSemaphore renderFinishedSemaphore; // GPU: "Rendering finished, safe to present!"
+    VkFence inFlightFence;               // CPU: "Wait here until GPU finishes this frame"
+};
 
 class ZeroApp {
     public:
@@ -15,6 +25,7 @@ class ZeroApp {
 
         ZeroApp(const ZeroApp&) = delete;
         ZeroApp& operator=(const ZeroApp&) = delete;
+
         void run();
 
     private:
@@ -22,12 +33,22 @@ class ZeroApp {
         void mainLoop();
         void cleanup();
 
-    std::unique_ptr<Window> m_window;
-    std::unique_ptr<VulkanContext> m_vulkanContext;
-    // std::unique_ptr<VulkanRenderer> m_vulkanRenderer;
-    // std::unique_ptr<Scene> m_scene;
-        
+        void drawFrame();
+        void createFrameData();
+        void recreateSwapchain();
+
+        std::unique_ptr<Window> m_window;
+        std::unique_ptr<VulkanContext> m_vulkanContext;
+        std::unique_ptr<Swapchain> m_swapchain;
+        std::unique_ptr<IRenderer> m_renderer;
+
         bool m_isRunning;
+        bool m_framebufferResized;
+
+        // Double buffering synchronization
+        static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+        uint32_t m_currentFrame = 0;
+        std::vector<FrameData> m_frames;
 
 };
 

@@ -1,16 +1,26 @@
-#include "VulkanContext.h"
-#include "Window.h"
+#include "core/VulkanContext.h"
+#include "core/Window.h"
+
+#define VOLK_IMPLEMENTATION
+#include <volk/volk.h>
 
 #define VMA_IMPLEMENTATION
 #include <vma/vk_mem_alloc.h>
 
+#include "util/Log.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdexcept>
-
+#include <iostream>
 
 VulkanContext::VulkanContext(Window* window) {
+    CHK(volkInitialize());
+
     createInstance(window);
+    volkLoadInstance(m_instance);
+
+    createSurface(window);
     selectPhysicalDevice();
     createLogicalDevice();
     initVma();
@@ -19,65 +29,174 @@ VulkanContext::VulkanContext(Window* window) {
 VulkanContext::~VulkanContext() {
     vmaDestroyAllocator(m_allocator);
     vkDestroyDevice(m_device, nullptr);
+    vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
     vkDestroyInstance(m_instance, nullptr);
 }
 
 void VulkanContext::createInstance(Window* window) {
     uint32_t extensionCount{ 0 };
-	char const* const* instanceExtensions{ SDL_Vulkan_GetInstanceExtensions(&extensionCount) };
-    VkApplicationInfo appInfo{};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "Zero Engine";
-    appInfo.apiVersion = VK_API_VERSION_1_4;
+    char const* const* instanceExtensions{ SDL_Vulkan_GetInstanceExtensions(&extensionCount) };
 
-    VkInstanceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    createInfo.pApplicationInfo = &appInfo;
-    createInfo.enabledExtensionCount = static_cast<uint32_t>(extensionCount);
-    createInfo.ppEnabledExtensionNames = instanceExtensions;
+    VkApplicationInfo appInfo{
+        .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+        .pApplicationName = "Zero Engine",
+        .apiVersion = VK_API_VERSION_1_3 // Stable 1.3 for VMA compatibility and reference standard
+    };
 
-    if (vkCreateInstance(&createInfo, nullptr, &m_instance) != VK_SUCCESS) {
-        throw std::runtime_error("Vulkan 인스턴스 생성 실패");
-    }
+    VkInstanceCreateInfo createInfo{
+        .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+        .pApplicationInfo = &appInfo,
+        .enabledExtensionCount = extensionCount,
+        .ppEnabledExtensionNames = instanceExtensions
+    };
+
+    CHK(vkCreateInstance(&createInfo, nullptr, &m_instance));
+}
+
+void VulkanContext::createSurface(Window* window) {
+    CHK(SDL_Vulkan_CreateSurface(window->getNativeHandle(), m_instance, nullptr, &m_surface));
 }
 
 void VulkanContext::selectPhysicalDevice() {
-    // 간단하게 첫 번째 GPU 선택 (실제 구현 시에는 레이 트레이싱 지원 여부 체크 필수)
     uint32_t deviceCount = 0;
-    vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr);
+    CHK(vkEnumeratePhysicalDevices(m_instance, &deviceCount, nullptr));
+    CHK(deviceCount > 0); // Ensure at least one Vulkan-compatible GPU is found
+
     std::vector<VkPhysicalDevice> devices(deviceCount);
-    vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data());
-    
-    m_physicalDevice = devices[0]; 
+    CHK(vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data()));
+
+    // Temporarily select the first device (TODO: Add logic to evaluate ray tracing support later)
+    m_physicalDevice = devices[0];
+
+    VkPhysicalDeviceProperties2 deviceProperties{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+    vkGetPhysicalDeviceProperties2(m_physicalDevice, &deviceProperties);
+    std::cout << "[Zero Engine] Selected GPU: " << deviceProperties.properties.deviceName << "\n";
+
+    // Find a graphics queue family
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &queueFamilyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &queueFamilyCount, queueFamilies.data());
+
+    bool found = false;
+    for (uint32_t i = 0; i < queueFamilies.size(); i++) {
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            // Check if this queue also supports presentation to the SDL window
+            if (SDL_Vulkan_GetPresentationSupport(m_instance, m_physicalDevice, i)) {
+                m_graphicsQueueFamily = i;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    CHK(found); // Ensure a suitable graphics/present queue family was found
 }
 
 void VulkanContext::createLogicalDevice() {
     float queuePriority = 1.0f;
-    VkDeviceQueueCreateInfo queueCreateInfo{};
-    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueCreateInfo.queueFamilyIndex = 0; // 예시 인덱스 (실제는 큐 패밀리 조회 필요)
-    queueCreateInfo.queueCount = 1;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    VkDeviceQueueCreateInfo queueCI{
+        .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+        .queueFamilyIndex = m_graphicsQueueFamily,
+        .queueCount = 1,
+        .pQueuePriorities = &queuePriority
+    };
 
-    VkDeviceCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    createInfo.queueCreateInfoCount = 1;
-    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    // ★ Core Feature Activation Chain for Modern Rendering & Ray Tracing ★
 
-    if (vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device) != VK_SUCCESS) {
-        throw std::runtime_error("Logical Device 생성 실패");
-    }
-    vkGetDeviceQueue(m_device, 0, 0, &m_graphicsQueue);
+    // 1. Buffer Device Address (BDA) & Descriptor Indexing
+    VkPhysicalDeviceVulkan12Features enabledVk12Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+        .descriptorIndexing = VK_TRUE,
+        .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+        .descriptorBindingVariableDescriptorCount = VK_TRUE,
+        .runtimeDescriptorArray = VK_TRUE,
+        .bufferDeviceAddress = VK_TRUE
+    };
+
+    // 2. Dynamic Rendering & Sync2
+    VkPhysicalDeviceVulkan13Features enabledVk13Features{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+        .pNext = &enabledVk12Features, // Chain link 1
+        .synchronization2 = VK_TRUE,
+        .dynamicRendering = VK_TRUE
+    };
+
+    // 3. Acceleration Structure
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR accelStructFeatures{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR,
+        .pNext = &enabledVk13Features, // Chain link 2
+        .accelerationStructure = VK_TRUE
+    };
+
+    // 4. Ray Tracing Pipeline
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR,
+        .pNext = &accelStructFeatures, // Chain link 3
+        .rayTracingPipeline = VK_TRUE
+    };
+
+    // 5. Ray Query (Inline Ray Tracing in Compute/Fragment shaders)
+    VkPhysicalDeviceRayQueryFeaturesKHR rayQueryFeatures{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR,
+        .pNext = &rtPipelineFeatures, // Chain link 4
+        .rayQuery = VK_TRUE
+    };
+
+    // 6. KHR Cooperative Matrix (For Tensor Core acceleration & Neural Rendering)
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR coopMatrixFeatures{
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+        .pNext = &rayQueryFeatures, // Chain link 5
+        .cooperativeMatrix = VK_TRUE
+    };
+
+    // Basic features
+    VkPhysicalDeviceFeatures enabledVk10Features{
+        .samplerAnisotropy = VK_TRUE
+    };
+
+    // Add all the required device extensions
+    const std::vector<const char*> deviceExtensions = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+        VK_KHR_RAY_QUERY_EXTENSION_NAME,
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, // Required by ray tracing pipeline
+        VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME        // Standard KHR extension for Tensor Cores
+    };
+
+    VkDeviceCreateInfo deviceCI{
+        .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+        // The head of our massive pNext chain goes here!
+        .pNext = &coopMatrixFeatures,
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &queueCI,
+        .enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size()),
+        .ppEnabledExtensionNames = deviceExtensions.data(),
+        .pEnabledFeatures = &enabledVk10Features
+    };
+
+    CHK(vkCreateDevice(m_physicalDevice, &deviceCI, nullptr, &m_device));
+
+    volkLoadDevice(m_device); // Load device-specific function pointers
+    vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
 }
 
 void VulkanContext::initVma() {
-    VmaAllocatorCreateInfo allocatorInfo{};
-    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
-    allocatorInfo.physicalDevice = m_physicalDevice;
-    allocatorInfo.device = m_device;
-    allocatorInfo.instance = m_instance;
+    VmaVulkanFunctions vkFunctions{
+        .vkGetInstanceProcAddr = vkGetInstanceProcAddr,
+        .vkGetDeviceProcAddr = vkGetDeviceProcAddr,
+        .vkCreateImage = vkCreateImage
+    };
 
-    if (vmaCreateAllocator(&allocatorInfo, &m_allocator) != VK_SUCCESS) {
-        throw std::runtime_error("VMA 할당자 생성 실패");
-    }
+    VmaAllocatorCreateInfo allocatorInfo{
+        .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT, // ★ Required for BDA
+        .physicalDevice = m_physicalDevice,
+        .device = m_device,
+        .pVulkanFunctions = &vkFunctions,
+        .instance = m_instance,
+        .vulkanApiVersion = VK_API_VERSION_1_3
+    };
+
+    CHK(vmaCreateAllocator(&allocatorInfo, &m_allocator));
 }
