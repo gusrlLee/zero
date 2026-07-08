@@ -7,3 +7,6 @@
 [submodule "vender/glm"]
 	path = vender/glm
 	url = https://github.com/g-truc/glm.git
+[submodule "vender/tinygltf"]
+	path = vender/tinygltf
+	url = https://github.com/syoyo/tinygltf.git

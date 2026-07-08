@@ -34,6 +34,8 @@ add_executable(${PROJECT_NAME}
     src/core/VulkanContext.cpp
     src/core/Swapchain.h
     src/core/Swapchain.cpp
+    src/core/Buffer.h
+    src/core/Buffer.cpp
 
     src/renderer/IRenderer.h
     src/renderer/ShaderCompiler.h
@@ -42,8 +44,13 @@ add_executable(${PROJECT_NAME}
     src/renderer/raster/PbrRenderer.h
     src/renderer/raster/PbrRenderer.cpp
 
+    src/scene/Camera.h
+    src/scene/Camera.cpp
+    src/scene/Mesh.h
+    src/scene/Mesh.cpp
 
     src/util/Log.h
+    src/util/TinyGltfImpl.cpp
 
     shaders/raster/shader.slang
 )
@@ -51,6 +58,8 @@ add_executable(${PROJECT_NAME}
 target_compile_definitions(${PROJECT_NAME} PUBLIC VK_NO_PROTOTYPES)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/vender)
+
 target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL_LIBRARY})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Slang_LIBRARY})
 target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan)

@@ -2,12 +2,26 @@
 #define __ZERO_PHYSICAL_BAESD_RENDERER_HEADER__
 
 #include "renderer/IRenderer.h"
+#include "scene/Camera.h"
+#include "scene/Mesh.h"
 #include <volk/volk.h>
+
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <memory>
 
+class Buffer;
 class VulkanContext;
 class Swapchain;
 class ShaderCompiler;
+
+struct PushConstants {
+    uint64_t cameraAddress;
+    uint64_t vertexBufferAddress;
+};
 
 class PbrRenderer : public IRenderer {
 public:
@@ -25,8 +39,16 @@ private:
 
     std::unique_ptr<ShaderCompiler> m_shaderCompiler;
 
+    std::unique_ptr<Camera> m_camera;
+    std::unique_ptr<Mesh> m_mesh;
+
     VkPipelineLayout m_pipelineLayout{ VK_NULL_HANDLE };
     VkPipeline m_pipeline{ VK_NULL_HANDLE };
+
+    std::unique_ptr<Buffer> m_cameraBuffer;
+    struct ShaderCameraData {
+        glm::mat4 viewProj;
+    };
 };
 
 

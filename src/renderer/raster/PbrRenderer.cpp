@@ -1,6 +1,7 @@
 #include "renderer/raster/PbrRenderer.h"
 #include "core/VulkanContext.h"
 #include "core/Swapchain.h"
+#include "core/Buffer.h"
 #include "renderer/ShaderCompiler.h"
 #include "util/Log.h"
 
@@ -20,6 +21,14 @@ PbrRenderer::~PbrRenderer() {
 
 void PbrRenderer::init() {
     VkDevice device = m_context->getDevice();
+
+    m_camera = std::make_unique<Camera>(45.0f, 1920.0f / 1080.0f, 0.1f, 1000.0f);
+    m_mesh = std::make_unique<Mesh>(m_context, "../assets/DamagedHelmet/glTF/DamagedHelmet.gltf"); 
+
+    m_cameraBuffer = std::make_unique<Buffer>(
+        m_context, sizeof(ShaderCameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+    );
 
     // 1. Slang 셰이더 컴파일 (동일한 파일에서 각각의 Entry Point 추출)
     VkShaderModule vertShader = m_shaderCompiler->compileToShaderModule("../shaders/raster/shader.slang", "vertexMain");
@@ -44,7 +53,7 @@ void PbrRenderer::init() {
     VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_ALL,
         .offset = 0,
-        .size = sizeof(uint64_t) // shader.slang에 정의된 PushConstants 크기 (8 byte)
+        .size = sizeof(PushConstants) // 16 bytes
     };
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI{
@@ -108,6 +117,13 @@ void PbrRenderer::init() {
     // 셰이더 모듈은 파이프라인 생성 후 삭제해도 됩니다.
     vkDestroyShaderModule(device, vertShader, nullptr);
     vkDestroyShaderModule(device, fragShader, nullptr);
+
+    m_cameraBuffer = std::make_unique<Buffer>(
+        m_context,
+        sizeof(ShaderCameraData),
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+    );
 }
 
 void PbrRenderer::onResize(uint32_t width, uint32_t height) {
@@ -183,27 +199,35 @@ void PbrRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
         .pDepthAttachment = &depthAttachment
     };
 
-    vkCmdBeginRendering(cmd, &renderingInfo);
-
     // ----------------------------------------------------
     // ★ 실제 그리기 (Draw) 로직 시작
     // ----------------------------------------------------
+    vkCmdBeginRendering(cmd, &renderingInfo);
+
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
 
-    // Dynamic Viewport / Scissor 설정
     VkViewport viewport{ 0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f };
     vkCmdSetViewport(cmd, 0, 1, &viewport);
-
     VkRect2D scissor{ {0, 0}, extent };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Push Constants 전달 (임시 데이터)
-    uint64_t dummyAddress = 0;
-    vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(uint64_t), &dummyAddress);
+    // 1. 카메라 업데이트 (살짝 위에서 아래로 내려다보도록 위치 조정)
+    glm::mat4 view = glm::lookAt(glm::vec3(2.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 proj = m_camera->getProjectionMatrix(); // Camera 클래스에서 계산된 투영 행렬 사용
 
-    // 3개의 버텍스 그리기 (버퍼 없이 셰이더에서 바로 생성)
-    vkCmdDraw(cmd, 3, 1, 0, 0);
-    // ----------------------------------------------------
+    ShaderCameraData camData{ proj * view };
+    m_cameraBuffer->uploadData(&camData, sizeof(ShaderCameraData));
+
+    PushConstants pc{
+        .cameraAddress = m_cameraBuffer->getDeviceAddress(),
+        .vertexBufferAddress = m_mesh->getVertexBufferAddress()
+    };
+
+    vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(PushConstants), &pc);
+    vkCmdBindIndexBuffer(cmd, m_mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+    for (const auto& subMesh : m_mesh->getSubMeshes()) {
+        vkCmdDrawIndexed(cmd, subMesh.indexCount, 1, subMesh.firstIndex, subMesh.vertexOffset, 0);
+    }
 
     vkCmdEndRendering(cmd);
 
