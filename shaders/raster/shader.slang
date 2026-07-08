@@ -11,10 +11,13 @@ struct Vertex {
 
 // C++에서 매 프레임 쏴줄 16바이트 (주소 2개)
 struct PushConstants {
-    CameraData* camera;
-    Vertex* vertices; // ★ BDA: 정점 버퍼의 메모리 주소!
+    CameraData *camera;
+    Vertex *vertices;
+    uint textureIndex; // C++에서 모델마다 텍스처 인덱스를 넘겨줍니다.
 };
 [[vk::push_constant]] ConstantBuffer<PushConstants> pushConsts;
+[[vk::binding(0, 0)]] Texture2D globalTextures[]; // Descriptor Set 0, Binding 0
+[[vk::binding(1, 0)]] SamplerState globalSamplers[]; // Descriptor Set 0, Binding 1
 
 struct VertexOutput {
     float4 position : SV_Position;
@@ -37,11 +40,12 @@ VertexOutput vertexMain(uint vertexID : SV_VertexID) {
 
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target {
+    float4 color = globalTextures[pushConsts.textureIndex].Sample(globalSamplers[pushConsts.textureIndex], input.uv);
     float3 N = normalize(input.normal);
-    float3 L = normalize(float3(1.0, 1.0, 1.0)); // 우측 상단에서 빛이 온다고 가정
-    float NdL = max(dot(N, L), 0.2);             // 최소한의 밝기(Ambient) 0.2 유지
+    float3 L = normalize(float3(1.0, 1.0, 1.0));
+    float NdL = max(dot(N, L), 0.2);
 
-    float3 baseColor = float3(0.2, 0.6, 1.0);    // 예쁜 파란색 모델
+    float3 baseColor = float3(0.2, 0.6, 1.0);
     float3 finalColor = baseColor * NdL;
     
     return float4(finalColor, 1.0);

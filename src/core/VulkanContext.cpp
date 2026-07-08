@@ -110,19 +110,19 @@ void VulkanContext::createLogicalDevice() {
 
     VkPhysicalDeviceVulkan11Features enabledVk11Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-        .shaderDrawParameters = VK_TRUE 
+        .shaderDrawParameters = VK_TRUE
     };
 
     // 1. Buffer Device Address (BDA) & Descriptor Indexing
-    VkPhysicalDeviceVulkan12Features enabledVk12Features{
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-		.pNext = &enabledVk11Features, 
-        .descriptorIndexing = VK_TRUE,
-        .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
-        .descriptorBindingVariableDescriptorCount = VK_TRUE,
-        .runtimeDescriptorArray = VK_TRUE,
-        .bufferDeviceAddress = VK_TRUE
-    };
+    VkPhysicalDeviceVulkan12Features enabledVk12Features{};
+        enabledVk12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        enabledVk12Features.pNext = &enabledVk11Features;
+        enabledVk12Features.descriptorIndexing = VK_TRUE;
+        enabledVk12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        enabledVk12Features.descriptorBindingVariableDescriptorCount = VK_TRUE;
+        enabledVk12Features.runtimeDescriptorArray = VK_TRUE;
+        enabledVk12Features.scalarBlockLayout = VK_TRUE;
+        enabledVk12Features.bufferDeviceAddress = VK_TRUE;
 
     // 2. Dynamic Rendering & Sync2
     VkPhysicalDeviceVulkan13Features enabledVk13Features{

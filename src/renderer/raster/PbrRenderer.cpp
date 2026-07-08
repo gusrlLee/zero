@@ -71,18 +71,55 @@ void PbrRenderer::init() {
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{ .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO, .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
 
     // Viewport / Scissor (Dynamic State로 설정하여 창 크기 변환 시 파이프라인 재생성 방지)
-    std::vector<VkDynamicState> dynamicStates = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    VkPipelineDynamicStateCreateInfo dynamicState{ .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), .pDynamicStates = dynamicStates.data() };
-    VkPipelineViewportStateCreateInfo viewportState{ .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1 };
+    std::vector<VkDynamicState> dynamicStates = { 
+        VK_DYNAMIC_STATE_VIEWPORT, 
+        VK_DYNAMIC_STATE_SCISSOR 
+    };
+
+    VkPipelineDynamicStateCreateInfo dynamicState{ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, 
+        .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), 
+        .pDynamicStates = dynamicStates.data() 
+    };
+
+    VkPipelineViewportStateCreateInfo viewportState{ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, 
+        .viewportCount = 1, 
+        .scissorCount = 1 
+    };
 
     // 래스터라이저 (컬링, 폴리곤 모드)
-    VkPipelineRasterizationStateCreateInfo rasterizer{ .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE, .frontFace = VK_FRONT_FACE_CLOCKWISE, .lineWidth = 1.0f };
-    VkPipelineMultisampleStateCreateInfo multisampling{ .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
-    VkPipelineDepthStencilStateCreateInfo depthStencil{ .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, .depthTestEnable = VK_TRUE, .depthWriteEnable = VK_TRUE, .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL };
+    VkPipelineRasterizationStateCreateInfo rasterizer{ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO, 
+        .polygonMode = VK_POLYGON_MODE_FILL, 
+        .cullMode = VK_CULL_MODE_NONE, 
+        .frontFace = VK_FRONT_FACE_CLOCKWISE, 
+        .lineWidth = 1.0f 
+    };
+
+    VkPipelineMultisampleStateCreateInfo multisampling{ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, 
+        .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT 
+    };
+
+    VkPipelineDepthStencilStateCreateInfo depthStencil{ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO, 
+        .depthTestEnable = VK_TRUE, 
+        .depthWriteEnable = VK_TRUE, 
+        .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL 
+    };
 
     // 컬러 블렌딩 (알파 블렌딩 끄기)
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{ .blendEnable = VK_FALSE, .colorWriteMask = 0xF /* RGBA 모두 쓰기 */ };
-    VkPipelineColorBlendStateCreateInfo colorBlending{ .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &colorBlendAttachment };
+    VkPipelineColorBlendAttachmentState colorBlendAttachment{ 
+        .blendEnable = VK_FALSE, 
+        .colorWriteMask = 0xF /* RGBA 모두 쓰기 */ 
+    };
+
+    VkPipelineColorBlendStateCreateInfo colorBlending{ 
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, 
+        .attachmentCount = 1, 
+        .pAttachments = &colorBlendAttachment 
+    };
 
     // 4. Dynamic Rendering 정보 연결 (RenderPass 대신 사용)
     VkFormat colorFormat = m_swapchain->getImageFormat();
