@@ -1,5 +1,7 @@
 #include "scene/Camera.h"
+
 #include <algorithm>
+#include <SDL3/SDL_scancode.h>
 
 Camera::Camera(float fov, float aspect, float nearClip, float farClip)
     : m_fov(fov), m_aspect(aspect), m_nearClip(nearClip), m_farClip(farClip) {
@@ -44,8 +46,13 @@ void Camera::processMouse(float xoffset, float yoffset) {
 void Camera::update(float deltaTime) {
     float velocity = m_movementSpeed * deltaTime;
 
-    // 임시: SDL_SCANCODE_W(26), S(22), A(4), D(7) (추후 SDL 스캔코드에 맞게 매핑 필요)
-    // 지금은 형태만 잡아두고, 이후 ZeroApp의 Event Loop와 연결할 때 정확히 매핑하겠습니다.
+    if (m_keys[SDL_SCANCODE_W]) m_position += m_front * velocity;
+    if (m_keys[SDL_SCANCODE_S]) m_position -= m_front * velocity;
+    if (m_keys[SDL_SCANCODE_A]) m_position -= m_right * velocity;
+    if (m_keys[SDL_SCANCODE_D]) m_position += m_right * velocity;
+
+    if (m_keys[SDL_SCANCODE_E]) m_position += m_worldUp * velocity;
+    if (m_keys[SDL_SCANCODE_Q]) m_position -= m_worldUp * velocity;
 }
 
 void Camera::updateCameraVectors() {

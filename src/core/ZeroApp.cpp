@@ -78,17 +78,37 @@ void ZeroApp::run() {
 }
 
 void ZeroApp::mainLoop() {
+    uint64_t lastTime = SDL_GetPerformanceCounter();
+
+    SDL_SetWindowRelativeMouseMode(m_window->getNativeHandle(), true);
+
     while (!m_window->shouldClose()) {
-        m_window->pollEvents();
+        uint64_t currentTime = SDL_GetPerformanceCounter();
+        float deltaTime = (float)(currentTime - lastTime) / SDL_GetPerformanceFrequency();
+        lastTime = currentTime;
 
-        // Window class needs a way to detect resize events.
-        // For now, we assume SDL polling updates this flag.
-        // if (m_window->wasResized()) { m_framebufferResized = true; }
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                m_window->close();
+            }
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
+                m_window->close();
+            }
+            if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                m_renderer->getCamera()->processMouse(event.motion.xrel, event.motion.yrel);
+            }
+            if (event.type == SDL_EVENT_KEY_DOWN) {
+                m_renderer->getCamera()->processKeyboard(event.key.scancode, true);
+            }
+            if (event.type == SDL_EVENT_KEY_UP) {
+                m_renderer->getCamera()->processKeyboard(event.key.scancode, false);
+            }
+        }
 
+        m_renderer->getCamera()->update(deltaTime);
         drawFrame();
     }
-
-    // Wait until GPU finishes all queued operations before destroying objects
     CHK(vkDeviceWaitIdle(m_vulkanContext->getDevice()));
 }
 

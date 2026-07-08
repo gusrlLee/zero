@@ -32,7 +32,7 @@ private:
     float m_yaw = -90.0f; // 처음엔 -Z축을 바라봄
     float m_pitch = 0.0f;
 
-    float m_movementSpeed = 2.5f;
+    float m_movementSpeed = 5.0f;
     float m_mouseSensitivity = 0.1f;
     float m_fov;
     float m_aspect;

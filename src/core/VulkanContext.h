@@ -23,6 +23,9 @@ class VulkanContext {
         VmaAllocator getAllocator() const { return m_allocator; }
         uint32_t getGraphicsQueueFamily() const { return m_graphicsQueueFamily; }
 
+        VkCommandBuffer beginSingleTimeCommands();
+        void endSingleTimeCommands(VkCommandBuffer commandBuffer);
+
     private:
         void createInstance(Window* window);
         void createSurface(Window* window);
@@ -38,6 +41,8 @@ class VulkanContext {
         VmaAllocator m_allocator{ VK_NULL_HANDLE };
 
         uint32_t m_graphicsQueueFamily{ 0 };
+
+        VkCommandPool m_transferCommandPool{ VK_NULL_HANDLE };
     };
 
 #endif

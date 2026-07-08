@@ -4,6 +4,7 @@
 #include "core/Buffer.h"
 #include "renderer/ShaderCompiler.h"
 #include "util/Log.h"
+#include "renderer/DescriptorManager.h"
 
 #include <array>
 #include <vector>
@@ -22,13 +23,11 @@ PbrRenderer::~PbrRenderer() {
 void PbrRenderer::init() {
     VkDevice device = m_context->getDevice();
 
-    m_camera = std::make_unique<Camera>(45.0f, 1920.0f / 1080.0f, 0.1f, 1000.0f);
+    m_camera = std::make_unique<Camera>(45.0f, 1920.0f / 1080.0f, 0.1f, 10000.0f);
     m_mesh = std::make_unique<Mesh>(m_context, "../assets/DamagedHelmet/glTF/DamagedHelmet.gltf"); 
 
-    m_cameraBuffer = std::make_unique<Buffer>(
-        m_context, sizeof(ShaderCameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
-    );
+    m_descriptorManager = std::make_unique<DescriptorManager>(m_context);
+    m_descriptorManager->updateTextures(m_mesh->getTextures());
 
     // 1. Slang 셰이더 컴파일 (동일한 파일에서 각각의 Entry Point 추출)
     VkShaderModule vertShader = m_shaderCompiler->compileToShaderModule("../shaders/raster/shader.slang", "vertexMain");
@@ -50,16 +49,18 @@ void PbrRenderer::init() {
     }};
 
     // 2. 파이프라인 레이아웃 (Push Constants 설정)
+    VkDescriptorSetLayout setLayout = m_descriptorManager->getLayout(); // 레이아웃 가져오기
+
     VkPushConstantRange pushConstantRange{
         .stageFlags = VK_SHADER_STAGE_ALL,
         .offset = 0,
-        .size = sizeof(PushConstants) // 16 bytes
+        .size = sizeof(PushConstants) // 24 bytes (패딩 포함)
     };
 
     VkPipelineLayoutCreateInfo pipelineLayoutCI{
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .setLayoutCount = 0, // 아직 Descriptor Set 없음
-        .pSetLayouts = nullptr,
+        .setLayoutCount = 1,              // ★ 0에서 1로 변경
+        .pSetLayouts = &setLayout,        // ★ nullptr에서 setLayout으로 변경
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &pushConstantRange
     };
@@ -154,13 +155,6 @@ void PbrRenderer::init() {
     // 셰이더 모듈은 파이프라인 생성 후 삭제해도 됩니다.
     vkDestroyShaderModule(device, vertShader, nullptr);
     vkDestroyShaderModule(device, fragShader, nullptr);
-
-    m_cameraBuffer = std::make_unique<Buffer>(
-        m_context,
-        sizeof(ShaderCameraData),
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
-    );
 }
 
 void PbrRenderer::onResize(uint32_t width, uint32_t height) {
@@ -173,6 +167,10 @@ void PbrRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
     VkImage depthImage = m_swapchain->getDepthImage();
     VkImageView depthImageView = m_swapchain->getDepthImageView();
     VkExtent2D extent = m_swapchain->getExtent();
+
+    VkFormat depthFormat = m_swapchain->getDepthFormat();
+    bool hasStencil = (depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT || depthFormat == VK_FORMAT_D24_UNORM_S8_UINT);
+    VkImageAspectFlags depthAspect = VK_IMAGE_ASPECT_DEPTH_BIT | (hasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
 
     // 1. [Sync2 Barrier] Color & Depth 쓰기 가능 상태로 전이
     std::array<VkImageMemoryBarrier2, 2> barriers = { {
@@ -196,8 +194,7 @@ void PbrRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
             .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .newLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
             .image = depthImage,
-            // ★ 수정: DEPTH_BIT 뒤에 | VK_IMAGE_ASPECT_STENCIL_BIT 를 추가합니다!
-            .subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 }
+            .subresourceRange = { depthAspect, 0, 1, 0, 1 }
         }
     }};
 
@@ -243,26 +240,30 @@ void PbrRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
 
+    // ★ 3. 디스크립터 세트(텍스처 배열) 바인딩!
+    VkDescriptorSet descriptorSet = m_descriptorManager->getDescriptorSet();
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+
     VkViewport viewport{ 0.0f, 0.0f, (float)extent.width, (float)extent.height, 0.0f, 1.0f };
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     VkRect2D scissor{ {0, 0}, extent };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     // 1. 카메라 업데이트 (살짝 위에서 아래로 내려다보도록 위치 조정)
-    glm::mat4 view = glm::lookAt(glm::vec3(2.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    glm::mat4 proj = m_camera->getProjectionMatrix(); // Camera 클래스에서 계산된 투영 행렬 사용
+    glm::mat4 view = m_camera->getViewMatrix();
+    glm::mat4 proj = m_camera->getProjectionMatrix();
+    glm::mat4 viewProj = proj * view;
 
-    ShaderCameraData camData{ proj * view };
-    m_cameraBuffer->uploadData(&camData, sizeof(ShaderCameraData));
-
-    PushConstants pc{
-        .cameraAddress = m_cameraBuffer->getDeviceAddress(),
-        .vertexBufferAddress = m_mesh->getVertexBufferAddress()
-    };
-
-    vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(PushConstants), &pc);
     vkCmdBindIndexBuffer(cmd, m_mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
     for (const auto& subMesh : m_mesh->getSubMeshes()) {
+        PushConstants pc{
+            .viewProj = viewProj, // ★ 행렬을 직접 꽂아넣음
+            .vertexBufferAddress = m_mesh->getVertexBufferAddress(),
+            .textureIndex = static_cast<uint32_t>(std::max(0, subMesh.textureIndex))
+        };
+
+        vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(PushConstants), &pc);
         vkCmdDrawIndexed(cmd, subMesh.indexCount, 1, subMesh.firstIndex, subMesh.vertexOffset, 0);
     }
 

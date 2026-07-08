@@ -28,6 +28,9 @@ VulkanContext::VulkanContext(Window* window) {
 
 VulkanContext::~VulkanContext() {
     vmaDestroyAllocator(m_allocator);
+    if (m_transferCommandPool) {
+        vkDestroyCommandPool(m_device, m_transferCommandPool, nullptr);
+    }
     vkDestroyDevice(m_device, nullptr);
     vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
     vkDestroyInstance(m_instance, nullptr);
@@ -123,6 +126,8 @@ void VulkanContext::createLogicalDevice() {
         enabledVk12Features.runtimeDescriptorArray = VK_TRUE;
         enabledVk12Features.scalarBlockLayout = VK_TRUE;
         enabledVk12Features.bufferDeviceAddress = VK_TRUE;
+        enabledVk12Features.descriptorBindingPartiallyBound = VK_TRUE;
+        enabledVk12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
 
     // 2. Dynamic Rendering & Sync2
     VkPhysicalDeviceVulkan13Features enabledVk13Features{
@@ -190,6 +195,13 @@ void VulkanContext::createLogicalDevice() {
 
     volkLoadDevice(m_device); // Load device-specific function pointers
     vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
+
+    VkCommandPoolCreateInfo poolInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        .queueFamilyIndex = m_graphicsQueueFamily
+    };
+    CHK(vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_transferCommandPool));
 }
 
 void VulkanContext::initVma() {
@@ -209,4 +221,36 @@ void VulkanContext::initVma() {
     };
 
     CHK(vmaCreateAllocator(&allocatorInfo, &m_allocator));
+}
+
+VkCommandBuffer VulkanContext::beginSingleTimeCommands() {
+    VkCommandBufferAllocateInfo allocInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = m_transferCommandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
+
+    VkCommandBufferBeginInfo beginInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    return commandBuffer;
+}
+
+void VulkanContext::endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+    vkEndCommandBuffer(commandBuffer);
+    VkSubmitInfo submitInfo{
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &commandBuffer
+    };
+
+    vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_graphicsQueue);
+
+    vkFreeCommandBuffers(m_device, m_transferCommandPool, 1, &commandBuffer);
 }

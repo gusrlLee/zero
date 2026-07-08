@@ -17,10 +17,12 @@ class Buffer;
 class VulkanContext;
 class Swapchain;
 class ShaderCompiler;
+class DescriptorManager;
 
 struct PushConstants {
-    uint64_t cameraAddress;
-    uint64_t vertexBufferAddress;
+    glm::mat4 viewProj;          // 64바이트 (카메라 매트릭스를 직접 전송)
+    uint64_t vertexBufferAddress;// 8바이트
+    uint32_t textureIndex;       // 4바이트
 };
 
 class PbrRenderer : public IRenderer {
@@ -33,22 +35,20 @@ public:
     void recordCommands(VkCommandBuffer cmd, uint32_t imageIndex) override;
     void onUI() override;
 
+    Camera* getCamera() const override { return m_camera.get(); }
+
 private:
     VulkanContext* m_context;
     Swapchain* m_swapchain;
 
     std::unique_ptr<ShaderCompiler> m_shaderCompiler;
+    std::unique_ptr<DescriptorManager> m_descriptorManager;
 
     std::unique_ptr<Camera> m_camera;
     std::unique_ptr<Mesh> m_mesh;
 
     VkPipelineLayout m_pipelineLayout{ VK_NULL_HANDLE };
     VkPipeline m_pipeline{ VK_NULL_HANDLE };
-
-    std::unique_ptr<Buffer> m_cameraBuffer;
-    struct ShaderCameraData {
-        glm::mat4 viewProj;
-    };
 };
 
 

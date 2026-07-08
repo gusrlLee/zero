@@ -4,6 +4,8 @@
 #include <volk/volk.h>
 #include <cstdint>
 
+class Camera;
+
 class IRenderer {
 public:
     virtual ~IRenderer() = default;
@@ -19,6 +21,8 @@ public:
 
     // For ImGui parameter tuning
     virtual void onUI() {}
+
+    virtual Camera* getCamera() const = 0;
 };
 
 #endif

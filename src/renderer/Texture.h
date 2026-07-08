@@ -13,6 +13,9 @@ public:
     Texture(VulkanContext* context, const std::string& filepath);
     ~Texture();
 
+    Texture(const Texture&) = delete;
+    Texture& operator=(const Texture&) = delete;
+
     VkImageView getImageView() const { return m_imageView; }
     VkSampler getSampler() const { return m_sampler; }
 

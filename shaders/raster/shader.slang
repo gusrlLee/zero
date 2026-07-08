@@ -1,23 +1,21 @@
-struct CameraData {
-    float4x4 viewProj;
-};
+// shaders/raster/shader.slang
 
-// C++의 Vertex 구조체와 완벽하게 동일해야 함
 struct Vertex {
-    float3 position;
-    float3 normal;
-    float2 uv;
+    float px, py, pz;
+    float nx, ny, nz;
+    float u, v;
 };
 
-// C++에서 매 프레임 쏴줄 16바이트 (주소 2개)
+// ★ CameraData 구조체 삭제 후, PushConstants에 매트릭스 직접 삽입
 struct PushConstants {
-    CameraData *camera;
+    float4x4 viewProj;
     Vertex *vertices;
-    uint textureIndex; // C++에서 모델마다 텍스처 인덱스를 넘겨줍니다.
+    uint textureIndex;
 };
 [[vk::push_constant]] ConstantBuffer<PushConstants> pushConsts;
-[[vk::binding(0, 0)]] Texture2D globalTextures[]; // Descriptor Set 0, Binding 0
-[[vk::binding(1, 0)]] SamplerState globalSamplers[]; // Descriptor Set 0, Binding 1
+
+[[vk::binding(0, 0)]] Texture2D globalTextures[];
+[[vk::binding(1, 0)]] SamplerState globalSamplers[];
 
 struct VertexOutput {
     float4 position : SV_Position;
@@ -30,23 +28,30 @@ VertexOutput vertexMain(uint vertexID : SV_VertexID) {
     VertexOutput output;
     
     Vertex v = pushConsts.vertices[vertexID];
+    
+    // float들을 조합
+    float3 pos = float3(v.px, v.py, v.pz);
+    float3 norm = float3(v.nx, v.ny, v.nz);
+    float2 uv = float2(v.u, v.v);
 
-    output.position = mul(pushConsts.camera.viewProj, float4(v.position, 1.0));
-    output.normal = v.normal;
-    output.uv = v.uv;
+    // ★ pushConsts 안에 있는 뷰프로젝션 직접 사용
+    output.position = mul(pushConsts.viewProj, float4(pos, 1.0));
+    output.normal = norm;
+    output.uv = uv;
     
     return output;
 }
 
 [shader("fragment")]
 float4 fragmentMain(VertexOutput input) : SV_Target {
-    float4 color = globalTextures[pushConsts.textureIndex].Sample(globalSamplers[pushConsts.textureIndex], input.uv);
+    float4 texColor = globalTextures[pushConsts.textureIndex].Sample(globalSamplers[pushConsts.textureIndex], input.uv);
+    
+    // 뚫린 나뭇잎 등을 표현하기 위한 알파 테스팅
+    if (texColor.a < 0.1) discard;
+
     float3 N = normalize(input.normal);
     float3 L = normalize(float3(1.0, 1.0, 1.0));
     float NdL = max(dot(N, L), 0.2);
 
-    float3 baseColor = float3(0.2, 0.6, 1.0);
-    float3 finalColor = baseColor * NdL;
-    
-    return float4(finalColor, 1.0);
+    return float4(texColor.rgb * NdL, texColor.a);
 }

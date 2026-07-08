@@ -42,6 +42,8 @@ add_executable(${PROJECT_NAME}
     src/renderer/ShaderCompiler.cpp
     src/renderer/Texture.h
     src/renderer/Texture.cpp
+    src/renderer/DescriptorManager.h
+    src/renderer/DescriptorManager.cpp
 
     src/renderer/raster/PbrRenderer.h
     src/renderer/raster/PbrRenderer.cpp

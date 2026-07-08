@@ -18,6 +18,10 @@ Buffer::Buffer(VulkanContext* context, VkDeviceSize size, VkBufferUsageFlags usa
         .usage = VMA_MEMORY_USAGE_AUTO
     };
 
+    if (vmaFlags & VMA_ALLOCATION_CREATE_MAPPED_BIT) {
+        allocInfo.requiredFlags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    }
+
     VmaAllocationInfo allocResultInfo{};
     CHK(vmaCreateBuffer(m_context->getAllocator(), &bufferInfo, &allocInfo, &m_buffer, &m_allocation, &allocResultInfo));
 

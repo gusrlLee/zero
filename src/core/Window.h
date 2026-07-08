@@ -13,6 +13,8 @@ public:
     Window &operator=(const Window &) = delete;
 
     bool shouldClose() const { return m_shouldClose; }
+    void close() { m_shouldClose = true; }
+
     void pollEvents();
     SDL_Window* getNativeHandle() const { return m_window; }
 
