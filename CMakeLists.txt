@@ -38,7 +38,24 @@ set(KTX_FEATURE_STATIC_LIBRARY ON  CACHE BOOL "" FORCE)
 set(KTX_WERROR                 OFF CACHE BOOL "" FORCE)
 add_subdirectory(vender/KTX-Software EXCLUDE_FROM_ALL)
 
+# --- Dear ImGui (core + SDL3 + Vulkan backends) ---
+# Compiled straight into the target. Because the target defines VK_NO_PROTOTYPES,
+# imgui_impl_vulkan auto-enables IMGUI_IMPL_VULKAN_NO_PROTOTYPES and we feed it
+# volk-loaded function pointers via ImGui_ImplVulkan_LoadFunctions().
+set(IMGUI_DIR ${CMAKE_SOURCE_DIR}/vender/imgui)
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+    ${IMGUI_DIR}/imgui_demo.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
+)
+
 add_executable(${PROJECT_NAME}
+    ${IMGUI_SOURCES}
+
     src/main.cpp
     
     src/core/Window.h
@@ -59,9 +76,16 @@ add_executable(${PROJECT_NAME}
     src/renderer/Texture.cpp
     src/renderer/DescriptorManager.h
     src/renderer/DescriptorManager.cpp
+    src/renderer/UIOverlay.h
+    src/renderer/UIOverlay.cpp
 
     src/renderer/raster/PbrRenderer.h
     src/renderer/raster/PbrRenderer.cpp
+
+    src/renderer/pathtracing/AccelerationStructure.h
+    src/renderer/pathtracing/AccelerationStructure.cpp
+    src/renderer/pathtracing/PathTracer.h
+    src/renderer/pathtracing/PathTracer.cpp
 
     src/scene/Camera.h
     src/scene/Camera.cpp
@@ -72,12 +96,16 @@ add_executable(${PROJECT_NAME}
     src/util/TinyGltfImpl.cpp
 
     shaders/raster/shader.slang
+    shaders/raster/pbr.slang
+    shaders/pathtracing/pathtrace.slang
+    shaders/pathtracing/fullscreen.slang
 )
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC VK_NO_PROTOTYPES)
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/vender)
+target_include_directories(${PROJECT_NAME} PRIVATE ${IMGUI_DIR} ${IMGUI_DIR}/backends)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL_LIBRARY})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Slang_LIBRARY})

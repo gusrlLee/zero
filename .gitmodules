@@ -13,3 +13,6 @@
 [submodule "vender/KTX-Software"]
 	path = vender/KTX-Software
 	url = https://github.com/KhronosGroup/KTX-Software.git
+[submodule "vender/imgui"]
+	path = vender/imgui
+	url = https://github.com/ocornut/imgui.git

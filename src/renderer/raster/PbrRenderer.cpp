@@ -6,11 +6,13 @@
 #include "util/Log.h"
 #include "renderer/DescriptorManager.h"
 
+#include <imgui.h>
+
 #include <array>
 #include <vector>
 
-PbrRenderer::PbrRenderer(VulkanContext* context, Swapchain* swapchain)
-    : m_context(context), m_swapchain(swapchain) {
+PbrRenderer::PbrRenderer(VulkanContext* context, Swapchain* swapchain, Mesh* mesh, Camera* camera)
+    : m_context(context), m_swapchain(swapchain), m_camera(camera), m_mesh(mesh) {
     m_shaderCompiler = std::make_unique<ShaderCompiler>(m_context);
 }
 
@@ -23,15 +25,12 @@ PbrRenderer::~PbrRenderer() {
 void PbrRenderer::init() {
     VkDevice device = m_context->getDevice();
 
-    m_camera = std::make_unique<Camera>(45.0f, 1920.0f / 1080.0f, 0.1f, 10000.0f);
-    m_mesh = std::make_unique<Mesh>(m_context, "../assets/bistro/bistro.gltf");
-
     m_descriptorManager = std::make_unique<DescriptorManager>(m_context);
     m_descriptorManager->updateTextures(m_mesh->getTextures());
 
     // 1. Slang 셰이더 컴파일 (동일한 파일에서 각각의 Entry Point 추출)
-    VkShaderModule vertShader = m_shaderCompiler->compileToShaderModule("../shaders/raster/shader.slang", "vertexMain");
-    VkShaderModule fragShader = m_shaderCompiler->compileToShaderModule("../shaders/raster/shader.slang", "fragmentMain");
+    VkShaderModule vertShader = m_shaderCompiler->compileToShaderModule("../shaders/raster/pbr.slang", "vertexMain");
+    VkShaderModule fragShader = m_shaderCompiler->compileToShaderModule("../shaders/raster/pbr.slang", "fragmentMain");
 
     std::array<VkPipelineShaderStageCreateInfo, 2> shaderStages = { {
         {
@@ -249,46 +248,52 @@ void PbrRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
     VkRect2D scissor{ {0, 0}, extent };
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // 1. 카메라 업데이트 (살짝 위에서 아래로 내려다보도록 위치 조정)
+    // 카메라 & 라이팅 공통 데이터
     glm::mat4 view = m_camera->getViewMatrix();
     glm::mat4 proj = m_camera->getProjectionMatrix();
     glm::mat4 viewProj = proj * view;
 
+    PushConstants pc{
+        .viewProj = viewProj,
+        .vertexBufferAddress = m_mesh->getVertexBufferAddress(),
+        .materialBufferAddress = m_mesh->getMaterialBufferAddress(),
+        .cameraPos = glm::vec4(m_camera->getPosition(), 1.0f),
+        .sunDirection = glm::vec4(m_sunDirection, 0.0f),
+        .sunColor = glm::vec4(m_sunColor, m_sunIntensity),
+        .ambient = glm::vec4(m_ambientColor, m_ambientIntensity),
+        .materialIndex = 0
+    };
+
     vkCmdBindIndexBuffer(cmd, m_mesh->getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
     for (const auto& subMesh : m_mesh->getSubMeshes()) {
-        PushConstants pc{
-            .viewProj = viewProj, // ★ 행렬을 직접 꽂아넣음
-            .vertexBufferAddress = m_mesh->getVertexBufferAddress(),
-            .textureIndex = static_cast<uint32_t>(std::max(0, subMesh.textureIndex))
-        };
-
-        vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(PushConstants), &pc);
         // ★ 인덱스에 이미 vertexOffset을 더해 전역 인덱스로 만들었으므로 vertexOffset 인자는 0.
+        pc.materialIndex = subMesh.materialIndex;
+        vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(PushConstants), &pc);
         vkCmdDrawIndexed(cmd, subMesh.indexCount, 1, subMesh.firstIndex, 0, 0);
     }
 
     vkCmdEndRendering(cmd);
 
-    // 3. [Sync2 Barrier] Present용 상태로 전이
-    VkImageMemoryBarrier2 barrierToPresent{
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
-        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-        .dstAccessMask = 0,
-        .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
-        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        .image = swapchainImage,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
-    };
-
-    VkDependencyInfo dependencyInfoToPresent{
-        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &barrierToPresent
-    };
-    vkCmdPipelineBarrier2(cmd, &dependencyInfoToPresent);
+    // 스왑체인 이미지는 ATTACHMENT_OPTIMAL 상태로 남겨둔다.
+    // 이후 UI 오버레이가 그 위에 덧그리고, PRESENT_SRC로의 전이는 ZeroApp이 수행.
 }
 
-void PbrRenderer::onUI() {}
+void PbrRenderer::onUI() {
+    if (ImGui::Begin("PBR Renderer")) {
+        glm::vec3 p = m_camera->getPosition();
+        ImGui::Text("Camera: %.1f, %.1f, %.1f", p.x, p.y, p.z);
+        ImGui::Text("SubMeshes: %zu  Materials: %zu  Textures: %zu",
+            m_mesh->getSubMeshes().size(), m_mesh->getMaterialCount(), m_mesh->getTextures().size());
+
+        ImGui::SeparatorText("Sun (directional)");
+        ImGui::DragFloat3("Direction", &m_sunDirection.x, 0.01f, -1.0f, 1.0f);
+        ImGui::ColorEdit3("Color##sun", &m_sunColor.x);
+        ImGui::DragFloat("Intensity##sun", &m_sunIntensity, 0.05f, 0.0f, 50.0f);
+
+        ImGui::SeparatorText("Ambient");
+        ImGui::ColorEdit3("Color##amb", &m_ambientColor.x);
+        ImGui::DragFloat("Intensity##amb", &m_ambientIntensity, 0.01f, 0.0f, 5.0f);
+    }
+    ImGui::End();
+}

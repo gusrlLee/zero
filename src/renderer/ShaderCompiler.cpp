@@ -39,9 +39,15 @@ VkShaderModule ShaderCompiler::compileToShaderModule(const std::string& filePath
     Slang::ComPtr<slang::ISession> slangSession;
     m_globalSession->createSession(slangSessionDesc, slangSession.writeRef());
 
-    // 파일에서 모듈 로드 (에러가 나면 콘솔에 찍기 위해 nullptr 대신 진단 메시지 캡처 가능)
-    Slang::ComPtr<slang::IModule> slangModule{ slangSession->loadModuleFromSource("triangle_shader", filePath.c_str(), nullptr, nullptr) };    
+    // 파일에서 모듈 로드 (파싱/문법 에러 진단을 캡처해 콘솔에 출력)
+    Slang::ComPtr<slang::IBlob> loadDiagnostics;
+    Slang::ComPtr<slang::IModule> slangModule{ slangSession->loadModuleFromSource("triangle_shader", filePath.c_str(), nullptr, loadDiagnostics.writeRef()) };
+    // 로드 실패 시에만 진단 출력 (경고성 메시지는 노이즈이므로 무시)
     if (!slangModule) {
+        if (loadDiagnostics && loadDiagnostics->getBufferSize() > 0) {
+            std::cerr << "[ShaderCompiler] " << filePath << "\n"
+                      << std::string((const char*)loadDiagnostics->getBufferPointer(), loadDiagnostics->getBufferSize()) << std::endl;
+        }
         throw std::runtime_error("[ShaderCompiler] Failed to load Slang module: " + filePath);
     }
 
@@ -58,12 +64,12 @@ VkShaderModule ShaderCompiler::compileToShaderModule(const std::string& filePath
     Slang::ComPtr<slang::IBlob> diagnosticBlob; // raw 포인터 대신 ComPtr 사용
     SlangResult res = program->getEntryPointCode(0, 0, spirvBlob.writeRef(), diagnosticBlob.writeRef());
 
-    if (diagnosticBlob && diagnosticBlob->getBufferSize() > 0) {
-        std::string errorMsg((const char*)diagnosticBlob->getBufferPointer(), diagnosticBlob->getBufferSize());
-        std::cerr << "[ShaderCompiler Diagnostic]\n" << errorMsg << std::endl;
-    }
-
+    // 컴파일 실패 시에만 진단 출력 (경고성 메시지는 무시)
     if (SLANG_FAILED(res)) {
+        if (diagnosticBlob && diagnosticBlob->getBufferSize() > 0) {
+            std::string errorMsg((const char*)diagnosticBlob->getBufferPointer(), diagnosticBlob->getBufferSize());
+            std::cerr << "[ShaderCompiler Diagnostic]\n" << errorMsg << std::endl;
+        }
         throw std::runtime_error("[ShaderCompiler] Failed to compile Slang code to SPIR-V.");
     }
 

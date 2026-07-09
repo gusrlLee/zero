@@ -25,9 +25,10 @@ DescriptorManager::DescriptorManager(VulkanContext* context) : m_context(context
     CHK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &m_pool));
 
     // 2. 레이아웃(Layout) 생성 (배열 크기 1000)
+    // 래스터(fragment)와 패스트레이서(compute) 모두에서 사용하므로 ALL 스테이지
     std::array<VkDescriptorSetLayoutBinding, 2> bindings = { {
-        { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr },
-        { 1, VK_DESCRIPTOR_TYPE_SAMPLER, 1000, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr }
+        { 0, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000, VK_SHADER_STAGE_ALL, nullptr },
+        { 1, VK_DESCRIPTOR_TYPE_SAMPLER, 1000, VK_SHADER_STAGE_ALL, nullptr }
     } };
 
     VkDescriptorBindingFlags flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;

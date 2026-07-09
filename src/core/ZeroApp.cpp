@@ -3,9 +3,15 @@
 #include "core/VulkanContext.h"
 #include "core/Swapchain.h"
 #include "renderer/IRenderer.h"
+#include "renderer/UIOverlay.h"
 #include "util/Log.h"
 
 #include "renderer/raster/PbrRenderer.h"
+#include "renderer/pathtracing/PathTracer.h"
+#include "scene/Camera.h"
+#include "scene/Mesh.h"
+
+#include <imgui.h>
 
 #include <SDL3/SDL.h>
 #include <iostream>
@@ -27,9 +33,17 @@ void ZeroApp::init() {
     // 2. Command buffer & synchronization objects
     createFrameData();
 
-    // 3. Renderer initialization (TODO: Plug in actual renderer later)
-    m_renderer = std::make_unique<PbrRenderer>(m_vulkanContext.get(), m_swapchain.get());
-    m_renderer->init();
+    // 3. 공유 씬 리소스: 카메라 + 메시(한 번만 로드)
+    VkExtent2D extent = m_swapchain->getExtent();
+    float aspect = static_cast<float>(extent.width) / static_cast<float>(extent.height);
+    m_camera = std::make_unique<Camera>(45.0f, aspect, 0.1f, 10000.0f);
+    m_mesh = std::make_unique<Mesh>(m_vulkanContext.get(), "../assets/bistro/bistro.gltf");
+
+    // 4. 렌더러 (기본: PBR 래스터, F2로 패스트레이서 전환)
+    setRenderer(m_useRayTracer);
+
+    // 5. UI 오버레이 (ImGui)
+    m_ui = std::make_unique<UIOverlay>(m_vulkanContext.get(), m_window.get(), m_swapchain.get());
 
     m_isRunning = true;
     std::cout << "[Zero Engine] Initialization successfully completed." << std::endl;
@@ -73,6 +87,23 @@ void ZeroApp::createFrameData() {
     }
 }
 
+void ZeroApp::setRenderer(bool useRayTracer) {
+    CHK(vkDeviceWaitIdle(m_vulkanContext->getDevice()));
+    m_renderer.reset(); // 기존 렌더러 파괴 (mesh/camera는 ZeroApp이 계속 소유)
+
+    if (useRayTracer) {
+        m_renderer = std::make_unique<PathTracer>(
+            m_vulkanContext.get(), m_swapchain.get(), m_mesh.get(), m_camera.get());
+    }
+    else {
+        m_renderer = std::make_unique<PbrRenderer>(
+            m_vulkanContext.get(), m_swapchain.get(), m_mesh.get(), m_camera.get());
+    }
+    m_renderer->init();
+    m_useRayTracer = useRayTracer;
+    std::cout << "[Zero Engine] Renderer: " << (useRayTracer ? "Path Tracer" : "PBR Raster") << std::endl;
+}
+
 void ZeroApp::run() {
     mainLoop();
 }
@@ -80,6 +111,7 @@ void ZeroApp::run() {
 void ZeroApp::mainLoop() {
     uint64_t lastTime = SDL_GetPerformanceCounter();
 
+    // 시작은 카메라 시점 조작 모드 (마우스 캡처). F1으로 UI 조작 모드와 토글.
     SDL_SetWindowRelativeMouseMode(m_window->getNativeHandle(), true);
 
     while (!m_window->shouldClose()) {
@@ -89,27 +121,60 @@ void ZeroApp::mainLoop() {
 
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            m_ui->processEvent(&event); // ImGui가 먼저 이벤트를 확인
+
             if (event.type == SDL_EVENT_QUIT) {
                 m_window->close();
             }
             if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
                 m_window->close();
             }
-            if (event.type == SDL_EVENT_MOUSE_MOTION) {
-                m_renderer->getCamera()->processMouse(event.motion.xrel, event.motion.yrel);
+            // F1: 카메라 시점 모드 <-> UI 조작 모드 토글
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F1 && !event.key.repeat) {
+                m_cursorEnabled = !m_cursorEnabled;
+                SDL_SetWindowRelativeMouseMode(m_window->getNativeHandle(), !m_cursorEnabled);
             }
-            if (event.type == SDL_EVENT_KEY_DOWN) {
-                m_renderer->getCamera()->processKeyboard(event.key.scancode, true);
+            // F2: PBR 래스터 <-> 패스트레이서 전환
+            if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_F2 && !event.key.repeat) {
+                setRenderer(!m_useRayTracer);
             }
-            if (event.type == SDL_EVENT_KEY_UP) {
-                m_renderer->getCamera()->processKeyboard(event.key.scancode, false);
+
+            // UI 조작 모드가 아니고 ImGui가 입력을 잡고 있지 않을 때만 카메라 조작
+            bool cameraInput = !m_cursorEnabled && !m_ui->wantCaptureMouse() && !m_ui->wantCaptureKeyboard();
+            if (cameraInput) {
+                if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                    m_renderer->getCamera()->processMouse(event.motion.xrel, event.motion.yrel);
+                }
+                if (event.type == SDL_EVENT_KEY_DOWN) {
+                    m_renderer->getCamera()->processKeyboard(event.key.scancode, true);
+                }
+                if (event.type == SDL_EVENT_KEY_UP) {
+                    m_renderer->getCamera()->processKeyboard(event.key.scancode, false);
+                }
             }
         }
 
         m_renderer->getCamera()->update(deltaTime);
+        buildUI(deltaTime);
         drawFrame();
     }
     CHK(vkDeviceWaitIdle(m_vulkanContext->getDevice()));
+}
+
+void ZeroApp::buildUI(float deltaTime) {
+    m_ui->beginFrame();
+
+    if (ImGui::Begin("Zero Engine")) {
+        float fps = deltaTime > 0.0f ? 1.0f / deltaTime : 0.0f;
+        ImGui::Text("%.1f FPS (%.2f ms)", fps, deltaTime * 1000.0f);
+        ImGui::Text("Renderer: %s  (F2 to switch)", m_useRayTracer ? "Path Tracer" : "PBR Raster");
+        ImGui::Text("Mode: %s", m_cursorEnabled ? "UI (F1: camera)" : "Camera (F1: UI)");
+        ImGui::Separator();
+    }
+    ImGui::End();
+
+    // 각 렌더러가 자신의 패널을 추가
+    m_renderer->onUI();
 }
 
 void ZeroApp::drawFrame() {
@@ -127,6 +192,7 @@ void ZeroApp::drawFrame() {
     // Recreate swapchain if window resized or swapchain became invalid
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || m_framebufferResized) {
         m_framebufferResized = false;
+        ImGui::EndFrame(); // buildUI에서 시작한 프레임을 렌더 없이 마무리 (NewFrame/Render 짝 유지)
         recreateSwapchain();
         return; // Skip this frame and try again next loop
     }
@@ -146,10 +212,33 @@ void ZeroApp::drawFrame() {
     };
     CHK(vkBeginCommandBuffer(frame.commandBuffer, &beginInfo));
 
-    // Delegate actual drawing to the renderer logic
+    // Delegate actual drawing to the renderer logic.
+    // 렌더러는 스왑체인 이미지를 ATTACHMENT_OPTIMAL 상태로 남긴다.
     if (m_renderer) {
         m_renderer->recordCommands(frame.commandBuffer, imageIndex);
     }
+
+    // UI 오버레이를 씬 위에 덧그림 (ATTACHMENT_OPTIMAL 유지)
+    m_ui->render(frame.commandBuffer, m_swapchain->getImageView(imageIndex), m_swapchain->getExtent());
+
+    // 스왑체인 이미지를 ATTACHMENT_OPTIMAL -> PRESENT_SRC로 전이
+    VkImageMemoryBarrier2 barrierToPresent{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        .dstAccessMask = 0,
+        .oldLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL,
+        .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        .image = m_swapchain->getImage(imageIndex),
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    VkDependencyInfo dependencyInfoToPresent{
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrierToPresent
+    };
+    vkCmdPipelineBarrier2(frame.commandBuffer, &dependencyInfoToPresent);
 
     CHK(vkEndCommandBuffer(frame.commandBuffer));
 
@@ -218,6 +307,9 @@ void ZeroApp::recreateSwapchain() {
         CHK(vkCreateSemaphore(m_vulkanContext->getDevice(), &semaphoreCI, nullptr, &m_renderFinishedSemaphores[i]));
     }
 
+    if (m_camera) {
+        m_camera->setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
+    }
     if (m_renderer) {
         m_renderer->onResize(width, height);
     }

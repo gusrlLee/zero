@@ -39,12 +39,67 @@ void Mesh::loadGltf(const std::string& filepath) {
         m_textures.push_back(std::make_unique<Texture>(m_context, fullPath));
     }
 
+    parseMaterials(model);
+
     const tinygltf::Scene& scene = model.scenes[model.defaultScene > -1 ? model.defaultScene : 0];
     for (int nodeIndex : scene.nodes) {
         processNode(model, nodeIndex, glm::mat4(1.0f)); // 초기 행렬은 단위 행렬
     }
 
     std::cout << "[Mesh] Loaded GLTF: " << filepath << " (Vertices: " << m_vertices.size() << ", Indices: " << m_indices.size() << ")\n";
+}
+
+// glTF 머티리얼 -> GpuMaterial. metallic-roughness와 spec-glossiness(bistro) 모두 처리.
+void Mesh::parseMaterials(const tinygltf::Model& model) {
+    // glTF 텍스처 인덱스 -> 이미지(=bindless 배열) 인덱스
+    auto texImage = [&](int gltfTexIndex) -> int32_t {
+        if (gltfTexIndex < 0 || gltfTexIndex >= (int)model.textures.size()) return -1;
+        return model.textures[gltfTexIndex].source;
+    };
+
+    m_materials.reserve(model.materials.size() + 1);
+    for (const auto& mat : model.materials) {
+        GpuMaterial gm{};
+
+        const auto& mr = mat.pbrMetallicRoughness;
+        gm.baseColorFactor = glm::vec4(
+            (float)mr.baseColorFactor[0], (float)mr.baseColorFactor[1],
+            (float)mr.baseColorFactor[2], (float)mr.baseColorFactor[3]);
+        gm.metallic = (float)mr.metallicFactor;
+        gm.roughness = (float)mr.roughnessFactor;
+        gm.baseColorTex = texImage(mr.baseColorTexture.index);
+        gm.metalRoughTex = texImage(mr.metallicRoughnessTexture.index);
+
+        // metallic-roughness에 baseColor가 없으면 spec-gloss 확장 사용 (bistro)
+        auto sg = mat.extensions.find("KHR_materials_pbrSpecularGlossiness");
+        if (gm.baseColorTex < 0 && sg != mat.extensions.end()) {
+            const tinygltf::Value& ext = sg->second;
+            if (ext.Has("diffuseTexture") && ext.Get("diffuseTexture").Has("index"))
+                gm.baseColorTex = texImage(ext.Get("diffuseTexture").Get("index").GetNumberAsInt());
+            if (ext.Has("diffuseFactor")) {
+                const tinygltf::Value& df = ext.Get("diffuseFactor");
+                if (df.ArrayLen() == 4)
+                    gm.baseColorFactor = glm::vec4(
+                        (float)df.Get(0).GetNumberAsDouble(), (float)df.Get(1).GetNumberAsDouble(),
+                        (float)df.Get(2).GetNumberAsDouble(), (float)df.Get(3).GetNumberAsDouble());
+            }
+            // spec-gloss -> metallic-roughness 근사: 금속성 0, 러프니스 = 1 - glossiness
+            gm.metallic = 0.0f;
+            if (ext.Has("glossinessFactor"))
+                gm.roughness = 1.0f - (float)ext.Get("glossinessFactor").GetNumberAsDouble();
+        }
+
+        gm.normalTex = texImage(mat.normalTexture.index);
+        gm.occlusionTex = texImage(mat.occlusionTexture.index);
+        gm.emissiveTex = texImage(mat.emissiveTexture.index);
+        gm.emissiveFactor = glm::vec4(
+            (float)mat.emissiveFactor[0], (float)mat.emissiveFactor[1], (float)mat.emissiveFactor[2], 1.0f);
+
+        m_materials.push_back(gm);
+    }
+
+    // material이 지정되지 않은 프리미티브를 위한 기본 머티리얼
+    m_materials.push_back(GpuMaterial{});
 }
 
 void Mesh::processNode(const tinygltf::Model& model, int nodeIndex, const glm::mat4& parentMatrix) {
@@ -87,26 +142,12 @@ void Mesh::processNode(const tinygltf::Model& model, int nodeIndex, const glm::m
             subMesh.vertexOffset = static_cast<int32_t>(m_vertices.size());
             subMesh.firstIndex = static_cast<uint32_t>(m_indices.size());
 
-            if (primitive.material >= 0) {
-                const tinygltf::Material& mat = model.materials[primitive.material];
-
-                int texIndex = mat.pbrMetallicRoughness.baseColorTexture.index;
-
-                // metallic-roughness에 baseColor가 없으면 spec-gloss 확장의 diffuseTexture 사용
-                // (bistro는 KHR_materials_pbrSpecularGlossiness 워크플로우)
-                if (texIndex < 0) {
-                    auto it = mat.extensions.find("KHR_materials_pbrSpecularGlossiness");
-                    if (it != mat.extensions.end() && it->second.Has("diffuseTexture")) {
-                        const tinygltf::Value& difTex = it->second.Get("diffuseTexture");
-                        if (difTex.Has("index")) {
-                            texIndex = difTex.Get("index").GetNumberAsInt();
-                        }
-                    }
-                }
-
-                if (texIndex >= 0) {
-                    subMesh.textureIndex = model.textures[texIndex].source;
-                }
+            // 머티리얼 인덱스 지정 (없으면 마지막의 기본 머티리얼 사용)
+            if (primitive.material >= 0 && primitive.material < (int)m_materials.size()) {
+                subMesh.materialIndex = static_cast<uint32_t>(primitive.material);
+            }
+            else {
+                subMesh.materialIndex = static_cast<uint32_t>(m_materials.size() - 1);
             }
 
             // --- 인덱스 파싱 (기존과 동일) ---
@@ -191,9 +232,19 @@ void Mesh::processNode(const tinygltf::Model& model, int nodeIndex, const glm::m
 
 void Mesh::createBuffers() {
     m_indexCount = static_cast<uint32_t>(m_indices.size());
+    m_vertexCount = static_cast<uint32_t>(m_vertices.size());
+    m_triangleCount = m_indexCount / 3;
 
     VkDeviceSize vertexBufferSize = sizeof(Vertex) * m_vertices.size();
     VkDeviceSize indexBufferSize = sizeof(uint32_t) * m_indices.size();
+
+    // 삼각형별 머티리얼 인덱스 (레이트레이싱 hit에서 머티리얼 조회용)
+    std::vector<uint32_t> triMaterials(m_triangleCount, 0);
+    for (const auto& sm : m_subMeshes) {
+        uint32_t firstTri = sm.firstIndex / 3;
+        uint32_t triCount = sm.indexCount / 3;
+        for (uint32_t t = 0; t < triCount; ++t) triMaterials[firstTri + t] = sm.materialIndex;
+    }
 
     // 1. 임시 택배 상자(Staging Buffer) 생성 - CPU(RAM)에서 접근 가능
     Buffer stagingVertexBuffer(
@@ -214,17 +265,22 @@ void Mesh::createBuffers() {
 
     // 2. 실제 렌더링에 쓰일 초고속 VRAM 버퍼 생성 (0을 주어 VRAM에 할당 유도)
     // ★ 주의: TRANSFER_DST_BIT 플래그를 꼭 추가해야 복사 받을 수 있습니다!
+    // AS 빌드 입력으로도 쓰이므로 device address + AS-build-input 용도 추가
+    const VkBufferUsageFlags asInputUsage =
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+
     m_vertexBuffer = std::make_unique<Buffer>(
         m_context,
         vertexBufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | asInputUsage,
         0 // VMA 내부적으로 VRAM(Device Local)을 선호하게 됨
     );
 
     m_indexBuffer = std::make_unique<Buffer>(
         m_context,
         indexBufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | asInputUsage,
         0 // VRAM 할당
     );
     m_indexBufferHandle = m_indexBuffer->getHandle();
@@ -243,7 +299,56 @@ void Mesh::createBuffers() {
     // 4. (선택) GPU로 데이터가 완벽히 넘어갔으니, 메모리 확보를 위해 CPU의 원본 데이터 삭제
     m_vertices.clear();
     m_indices.clear();
+
+    // 5. 머티리얼 버퍼 (device address로 셰이더에서 직접 접근)
+    VkDeviceSize materialBufferSize = sizeof(GpuMaterial) * m_materials.size();
+    Buffer stagingMaterialBuffer(
+        m_context,
+        materialBufferSize,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+    );
+    stagingMaterialBuffer.uploadData(m_materials.data(), materialBufferSize);
+
+    m_materialBuffer = std::make_unique<Buffer>(
+        m_context,
+        materialBufferSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        0
+    );
+
+    VkCommandBuffer matCmd = m_context->beginSingleTimeCommands();
+    VkBufferCopy matCopyRegion{ .size = materialBufferSize };
+    vkCmdCopyBuffer(matCmd, stagingMaterialBuffer.getHandle(), m_materialBuffer->getHandle(), 1, &matCopyRegion);
+    m_context->endSingleTimeCommands(matCmd);
+
+    // 6. 삼각형별 머티리얼 인덱스 버퍼
+    VkDeviceSize triMatSize = sizeof(uint32_t) * triMaterials.size();
+    Buffer stagingTriMat(
+        m_context, triMatSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT
+    );
+    stagingTriMat.uploadData(triMaterials.data(), triMatSize);
+
+    m_triMaterialBuffer = std::make_unique<Buffer>(
+        m_context, triMatSize,
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        0
+    );
+    VkCommandBuffer triCmd = m_context->beginSingleTimeCommands();
+    VkBufferCopy triCopyRegion{ .size = triMatSize };
+    vkCmdCopyBuffer(triCmd, stagingTriMat.getHandle(), m_triMaterialBuffer->getHandle(), 1, &triCopyRegion);
+    m_context->endSingleTimeCommands(triCmd);
 }
 VkDeviceAddress Mesh::getVertexBufferAddress() const {
     return m_vertexBuffer->getDeviceAddress();
+}
+VkDeviceAddress Mesh::getIndexBufferAddress() const {
+    return m_indexBuffer->getDeviceAddress();
+}
+VkDeviceAddress Mesh::getMaterialBufferAddress() const {
+    return m_materialBuffer->getDeviceAddress();
+}
+VkDeviceAddress Mesh::getTriMaterialBufferAddress() const {
+    return m_triMaterialBuffer->getDeviceAddress();
 }
