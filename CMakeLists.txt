@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
 
-project(zero CXX)
+project(zero C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -22,6 +22,21 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     add_definitions(-DVK_USE_PLATFORM_WAYLAND_KHR -DVK_USE_PLATFORM_XCB_KHR)
 endif()
+
+# --- KTX-Software (libktx): KTX2 / Basis Universal texture loading ---
+# We only need the decode + transcode functionality; texture upload is done
+# manually with volk, so both GL and VK upload paths are disabled to avoid
+# pulling in extra deps and clashing with VK_NO_PROTOTYPES.
+set(KTX_FEATURE_TESTS          OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_TOOLS          OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_DOC            OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_JNI            OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_PY             OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_GL_UPLOAD      OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_VK_UPLOAD      OFF CACHE BOOL "" FORCE)
+set(KTX_FEATURE_STATIC_LIBRARY ON  CACHE BOOL "" FORCE)
+set(KTX_WERROR                 OFF CACHE BOOL "" FORCE)
+add_subdirectory(vender/KTX-Software EXCLUDE_FROM_ALL)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
@@ -67,6 +82,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/vender)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${SDL_LIBRARY})
 target_link_libraries(${PROJECT_NAME} PRIVATE ${Slang_LIBRARY})
 target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan)
+target_link_libraries(${PROJECT_NAME} PRIVATE ktx)
 
 # set_target_properties(zero PROPERTIES DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 # set_runtime_output_directory(${CMAKE_BINARY_DIR}/bin/)

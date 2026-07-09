@@ -10,3 +10,6 @@
 [submodule "vender/tinygltf"]
 	path = vender/tinygltf
 	url = https://github.com/syoyo/tinygltf.git
+[submodule "vender/KTX-Software"]
+	path = vender/KTX-Software
+	url = https://github.com/KhronosGroup/KTX-Software.git

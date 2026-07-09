@@ -24,7 +24,7 @@ void PbrRenderer::init() {
     VkDevice device = m_context->getDevice();
 
     m_camera = std::make_unique<Camera>(45.0f, 1920.0f / 1080.0f, 0.1f, 10000.0f);
-    m_mesh = std::make_unique<Mesh>(m_context, "../assets/DamagedHelmet/glTF/DamagedHelmet.gltf"); 
+    m_mesh = std::make_unique<Mesh>(m_context, "../assets/bistro/bistro.gltf");
 
     m_descriptorManager = std::make_unique<DescriptorManager>(m_context);
     m_descriptorManager->updateTextures(m_mesh->getTextures());
@@ -264,7 +264,8 @@ void PbrRenderer::recordCommands(VkCommandBuffer cmd, uint32_t imageIndex) {
         };
 
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(PushConstants), &pc);
-        vkCmdDrawIndexed(cmd, subMesh.indexCount, 1, subMesh.firstIndex, subMesh.vertexOffset, 0);
+        // ★ 인덱스에 이미 vertexOffset을 더해 전역 인덱스로 만들었으므로 vertexOffset 인자는 0.
+        vkCmdDrawIndexed(cmd, subMesh.indexCount, 1, subMesh.firstIndex, 0, 0);
     }
 
     vkCmdEndRendering(cmd);

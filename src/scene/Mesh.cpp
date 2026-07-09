@@ -89,8 +89,22 @@ void Mesh::processNode(const tinygltf::Model& model, int nodeIndex, const glm::m
 
             if (primitive.material >= 0) {
                 const tinygltf::Material& mat = model.materials[primitive.material];
-                if (mat.pbrMetallicRoughness.baseColorTexture.index >= 0) {
-                    int texIndex = mat.pbrMetallicRoughness.baseColorTexture.index;
+
+                int texIndex = mat.pbrMetallicRoughness.baseColorTexture.index;
+
+                // metallic-roughness에 baseColor가 없으면 spec-gloss 확장의 diffuseTexture 사용
+                // (bistro는 KHR_materials_pbrSpecularGlossiness 워크플로우)
+                if (texIndex < 0) {
+                    auto it = mat.extensions.find("KHR_materials_pbrSpecularGlossiness");
+                    if (it != mat.extensions.end() && it->second.Has("diffuseTexture")) {
+                        const tinygltf::Value& difTex = it->second.Get("diffuseTexture");
+                        if (difTex.Has("index")) {
+                            texIndex = difTex.Get("index").GetNumberAsInt();
+                        }
+                    }
+                }
+
+                if (texIndex >= 0) {
                     subMesh.textureIndex = model.textures[texIndex].source;
                 }
             }
@@ -112,7 +126,11 @@ void Mesh::processNode(const tinygltf::Model& model, int nodeIndex, const glm::m
                 else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
                     uint8_t byteVal; memcpy(&byteVal, indexPtr + i * indexStride, sizeof(uint8_t)); indexValue = byteVal;
                 }
-                m_indices.push_back(indexValue);
+                // ★ 버그 수정: 정점 풀링(device address) 방식에서는 셰이더가 SV_VertexID로
+                //   전역 정점 버퍼를 직접 인덱싱한다. glTF 인덱스는 프리미티브-로컬(0-베이스)이므로
+                //   vertexOffset을 더해 전역 인덱스로 변환해야 서브메쉬가 여러 개(Sponza)일 때
+                //   지오메트리가 꼬이지 않는다.
+                m_indices.push_back(indexValue + static_cast<uint32_t>(subMesh.vertexOffset));
             }
 
             // --- 정점 파싱 ---
